@@ -163,23 +163,28 @@ impl TermRenderer {
     where
         S: Write,
     {
+        let mut need_update = false;
         if editor.line() < self.y {
             self.y = editor.line();
+            need_update = true;
         }
 
         if editor.line() >= self.y + self.height {
             self.y = editor.line() - self.height + 1;
+            need_update = true;
         }
 
         if editor.column() < self.x {
             self.x = editor.column();
+            need_update = true;
         }
 
         if editor.column() >= self.x + self.width {
             self.x = editor.column() - self.width + 1;
+            need_update = true;
         }
 
-        if draw {
+        if draw || need_update {
             let mut screen = cursor::HideCursor::from(&mut *screen);
 
             let mut buffer = Vec::new();
