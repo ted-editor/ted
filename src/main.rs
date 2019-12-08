@@ -147,6 +147,14 @@ impl Editor {
     fn line(&self) -> usize {
         self.line
     }
+
+    fn save(&self, filename: String) {
+        let mut file = File::create(filename).unwrap();
+        for chunk in self.rope.chunks() {
+            write!(file, "{}", chunk).unwrap();
+        }
+        file.sync_all().unwrap();
+    }
 }
 
 struct TermRenderer {
@@ -227,8 +235,12 @@ impl TermRenderer {
 }
 
 fn main() {
-    let rope = if let Some(file) = args().nth(1) {
-        Rope::from_reader(File::open(file).unwrap()).unwrap()
+    let rope = if let Some(path) = args().nth(1) {
+        if let Ok(file) = File::open(path) {
+            Rope::from_reader(file).unwrap()
+        } else {
+            Rope::new()
+        }
     } else {
         Rope::new()
     };
@@ -252,6 +264,7 @@ fn main() {
         let mut draw = false;
         match evt {
             Event::Key(Key::Ctrl('q')) | Event::Key(Key::Esc) => break,
+            Event::Key(Key::Ctrl('s')) => if let Some(path) = args().nth(1) { editor.save(path); },
             Event::Key(key) => draw = editor.key(key),
             Event::Mouse(mouse) => editor.mouse(mouse, renderer.x, renderer.y),
             _ => {}
