@@ -31,25 +31,66 @@ impl Editor {
         }
     }
 
-    fn key(&mut self, key: Key) {
+    fn key(&mut self, key: Key) -> bool {
         match key {
             Key::Down => {
                 if self.line < self.max_line() {
                     self.line += 1;
                 }
+                false
             }
             Key::Right => {
                 if self.column < self.max_column() {
                     self.column += 1;
                 }
+                false
             }
             Key::Up => {
                 self.line = self.line.saturating_sub(1);
+                false
             }
             Key::Left => {
                 self.column = self.column.saturating_sub(1);
+                false
             }
-            _ => {}
+            Key::Char(c) => {
+                self.rope.insert_char(self.cursor(), c);
+                if c == '\n' {
+                    self.column = 0;
+                    self.line += 1;
+                } else {
+                    self.column = min(self.column + 1, self.max_column());
+                }
+                true
+            }
+            Key::Backspace => {
+                if self.column == 0 && self.line == 0 {
+                    false
+                } else {
+                    if self.column == 0 {
+                        self.line = self.line.saturating_sub(1);
+                        self.column = self.max_column()
+                    } else {
+                        self.column = self.column.saturating_sub(1);
+                    }
+
+                    let char_idx = self.cursor();
+                    self.rope.remove(char_idx..char_idx + 1);
+                    true
+                }
+            }
+            Key::Delete => {
+                if self.max_column() == 0 && self.max_line() == 0 {
+                    false
+                } else if self.column() == self.rope.line(self.line).len_chars() {
+                    false
+                } else {
+                    let char_idx = self.cursor();
+                    self.rope.remove(char_idx..char_idx + 1);
+                    true
+                }
+            }
+            _ => { false }
         }
     }
 
@@ -63,16 +104,24 @@ impl Editor {
         }
     }
 
+    fn cursor(&self) -> usize {
+        self.rope.line_to_char(self.line) + self.column()
+    }
+
     fn max_line(&self) -> usize {
         self.rope.len_lines().saturating_sub(1)
     }
 
     fn max_column(&self) -> usize {
-        self.rope
+        let max = self.rope
             .line(self.line)
-            .len_chars()
-            // -2: -1 for line return + -1 for 0 based
-            .saturating_sub(2)
+            .len_chars();
+
+        if max > 0 && self.rope.char(self.rope.line_to_char(self.line) + max - 1) == '\n' {
+            max - 1
+        } else {
+            max
+        }
     }
 
     fn column(&self) -> usize {
@@ -102,32 +151,27 @@ impl TermRenderer {
         }
     }
 
-    fn update<S>(&mut self, editor: &Editor, screen: &mut S, force: bool)
+    fn update<S>(&mut self, editor: &Editor, screen: &mut S, draw: bool)
     where
         S: Write,
     {
-        let mut need_update = force;
         if editor.line() < self.y {
             self.y = editor.line();
-            need_update = true;
         }
 
         if editor.line() >= self.y + self.height {
             self.y = editor.line() - self.height + 1;
-            need_update = true;
         }
 
         if editor.column() < self.x {
             self.x = editor.column();
-            need_update = true;
         }
 
         if editor.column() >= self.x + self.width {
             self.x = editor.column() - self.width + 1;
-            need_update = true;
         }
 
-        if need_update {
+        if draw {
             let mut screen = cursor::HideCursor::from(&mut *screen);
 
             let mut buffer = Vec::new();
@@ -138,7 +182,7 @@ impl TermRenderer {
                 .rope
                 .lines()
                 .map(|l| {
-                    let max = l.len_chars().saturating_sub(1);
+                    let max = l.len_chars();
                     l.slice(min(self.x, max)..min(self.x + self.width, max))
                 })
                 .skip(self.y)
@@ -147,7 +191,7 @@ impl TermRenderer {
             if let Some(first) = lines.next() {
                 write!(buffer, "\r{}", first).unwrap();
                 for line in lines {
-                    write!(buffer, "\n\r{}", line).unwrap();
+                    write!(buffer, "\r{}", line).unwrap();
                 }
             }
             screen.write(&buffer).unwrap();
@@ -187,12 +231,13 @@ fn main() {
 
     for c in stdin.events() {
         let evt = c.unwrap();
+        let mut draw = false;
         match evt {
-            Event::Key(Key::Ctrl('c')) => break,
-            Event::Key(key) => editor.key(key),
+            Event::Key(Key::Ctrl('q')) => break,
+            Event::Key(key) => draw = editor.key(key),
             Event::Mouse(mouse) => editor.mouse(mouse, renderer.x, renderer.y),
             _ => {}
         }
-        renderer.update(&editor, &mut screen, false);
+        renderer.update(&editor, &mut screen, draw);
     }
 }
