@@ -186,7 +186,7 @@ impl TermRenderer {
             write!(buffer, "{}", clear::All).unwrap();
             write!(buffer, "{}", cursor::Goto(1, 1)).unwrap();
 
-            let mut lines = editor
+            let lines = editor
                 .rope
                 .lines()
                 .map(|l| {
@@ -194,13 +194,10 @@ impl TermRenderer {
                     l.slice(min(self.x, max)..min(self.x + self.width, max))
                 })
                 .skip(self.y)
-                .take(self.height as usize);
+                .take(self.height as usize - 1);
 
-            if let Some(first) = lines.next() {
-                write!(buffer, "\r{}", first).unwrap();
-                for line in lines {
-                    write!(buffer, "\r{}", line).unwrap();
-                }
+            for line in lines {
+                write!(buffer, "\r{}", line).unwrap();
             }
             screen.write(&buffer).unwrap();
         }
