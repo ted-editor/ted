@@ -53,6 +53,14 @@ impl Editor {
                 self.column = self.column.saturating_sub(1);
                 false
             }
+            Key::Home | Key::Ctrl('a') => {
+                self.column = 0;
+                false
+            }
+            Key::End | Key::Ctrl('e') => {
+                self.column = self.max_column();
+                false
+            }
             Key::Char(c) => {
                 self.rope.insert_char(self.cursor(), c);
                 if c == '\n' {
@@ -233,7 +241,7 @@ fn main() {
         let evt = c.unwrap();
         let mut draw = false;
         match evt {
-            Event::Key(Key::Ctrl('q')) => break,
+            Event::Key(Key::Ctrl('q')) | Event::Key(Key::Esc) => break,
             Event::Key(key) => draw = editor.key(key),
             Event::Mouse(mouse) => editor.mouse(mouse, renderer.x, renderer.y),
             _ => {}
