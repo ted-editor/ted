@@ -42,6 +42,9 @@ impl Editor {
             Key::Right => {
                 if self.column < self.max_column() {
                     self.column += 1;
+                } else if self.line < self.max_line() {
+                    self.line += 1;
+                    self.column = 0;
                 }
                 false
             }
@@ -50,7 +53,12 @@ impl Editor {
                 false
             }
             Key::Left => {
-                self.column = self.column.saturating_sub(1);
+                if self.column > 0 {
+                    self.column -= 1;
+                } else if self.line > 0 {
+                    self.line -= 1;
+                    self.column = self.max_column();
+                }
                 false
             }
             Key::Home | Key::Ctrl('a') => {
