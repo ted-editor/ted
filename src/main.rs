@@ -3,6 +3,7 @@ use std::env::args;
 use std::fs::File;
 use std::io::{stdin, stdout, Write};
 use std::vec::Vec;
+use std::panic;
 
 use termion::clear;
 use termion::cursor;
@@ -10,7 +11,7 @@ use termion::style;
 use termion::event::{Event, Key, MouseEvent, MouseButton};
 use termion::input::{MouseTerminal, TermRead};
 use termion::raw::IntoRawMode;
-use termion::screen::AlternateScreen;
+use termion::screen;
 use termion::terminal_size;
 
 use ropey::Rope;
@@ -367,7 +368,6 @@ impl TermRenderer {
         }
 
         if draw || need_update {
-            let mut screen = cursor::HideCursor::from(&mut *screen);
 
             let mut buffer = Vec::with_capacity(self.width * self.height * 2);
             write!(buffer, "{}", clear::All).unwrap();
@@ -393,51 +393,69 @@ impl TermRenderer {
                     ln += 1;
                 }
             }
+
             screen.write(&buffer).unwrap();
+            screen.flush().unwrap();
         }
-        write!(
-            screen,
-            "{}",
-            cursor::Hide
-        ).unwrap();
-        screen.flush().unwrap();
     }
 }
 
 fn main() {
-    let rope = if let Some(path) = args().nth(1) {
-        if let Ok(file) = File::open(path) {
-            Rope::from_reader(file).unwrap()
+    let result = panic::catch_unwind(|| {
+        let rope = if let Some(path) = args().nth(1) {
+            if let Ok(file) = File::open(path) {
+                Rope::from_reader(file).unwrap()
+            } else {
+                Rope::new()
+            }
         } else {
             Rope::new()
-        }
-    } else {
-        Rope::new()
-    };
-
-    let mut editor = Editor::new(rope);
-
-    let mut renderer = TermRenderer::new();
-
-    let stdin = stdin();
-    let screen = stdout().into_raw_mode().unwrap();
-    let screen = AlternateScreen::from(screen);
-    let mut screen = MouseTerminal::from(screen);
-
-    // Cursor shape, https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
-    write!(screen, "\x1b[6 q").unwrap();
-
-    renderer.update(&editor, &mut screen, true);
-
-    for c in stdin.events() {
-        let evt = c.unwrap();
-        let draw = match evt {
-            Event::Key(Key::Ctrl('q')) => break,
-            Event::Key(Key::Ctrl('s')) => { if let Some(path) = args().nth(1) { editor.save(path); } false },
-            Event::Key(key) => editor.key(key, renderer.height - 1),
-            Event::Mouse(mouse) => { editor.mouse(mouse, renderer.x, renderer.y); false },
-            _ => { false }
         };
-        renderer.update(&editor, &mut screen, draw);
+
+        let mut editor = Editor::new(rope);
+
+        let mut renderer = TermRenderer::new();
+
+        let raw = stdout().into_raw_mode().unwrap();
+
+        let stdin = stdin();
+        let screen = stdout();
+        let screen = screen::AlternateScreen::from(screen);
+        let screen = cursor::HideCursor::from(screen);
+        let mut screen = MouseTerminal::from(screen);
+
+        // Switch to Main screen and disable raw mode before panic
+        let panic_hook = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            eprint!("{}", screen::ToMainScreen);
+            let _ = raw.suspend_raw_mode();
+            panic_hook(info);
+            let _ = raw.activate_raw_mode();
+            eprint!("{}", screen::ToAlternateScreen);
+        }));
+
+        // Cursor shape, https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+        write!(screen, "\x1b[6 q").unwrap();
+
+        renderer.update(&editor, &mut screen, true);
+
+        for c in stdin.events() {
+            let evt = c.unwrap();
+            let draw = match evt {
+                Event::Key(Key::Ctrl('q')) => break,
+                Event::Key(Key::Ctrl('s')) => { if let Some(path) = args().nth(1) { editor.save(path); } false },
+                Event::Key(key) => editor.key(key, renderer.height - 1),
+                Event::Mouse(mouse) => { editor.mouse(mouse, renderer.x, renderer.y); false },
+                _ => { false }
+            };
+            renderer.update(&editor, &mut screen, draw);
+        }
+    });
+
+    // Always try to flush after unwind to quit alternate screen
+    let _ = stdout().flush();
+
+    if let Err(err) = result {
+        panic::resume_unwind(err);
     }
 }
